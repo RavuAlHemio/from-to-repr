@@ -1,7 +1,12 @@
 [package]
 name = "from-to-repr"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
+license = "CC0-1.0"
+description = "Derives TryFrom and From implementations for the representation type of a Rust enumeration."
+repository = "https://github.com/RavuAlHemio/from-to-repr"
+readme = "README.md"
+keywords = ["enum", "from"]
 
 [dependencies]
 proc-macro2 = { version = "1.0.36" }
