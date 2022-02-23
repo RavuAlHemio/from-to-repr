@@ -1,0 +1,12 @@
+[package]
+name = "from-to-repr"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proc-macro2 = { version = "1.0.36" }
+quote = { version = "1.0.15" }
+syn = { version = "1.0.86" }
+
+[lib]
+proc-macro = true
