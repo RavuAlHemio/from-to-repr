@@ -6,7 +6,7 @@ use syn::{Data, DeriveInput, Meta, NestedMeta, parse_macro_input};
 /// Derives [`TryFrom`] and [`From`] implementations for the representation type of an enumeration.
 ///
 /// ```
-/// use bomsfront_proc_macros::FromToRepr;
+/// use from_to_repr::FromToRepr;
 ///
 /// #[derive(FromToRepr)]
 /// #[repr(u8)]
