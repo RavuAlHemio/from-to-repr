@@ -24,7 +24,7 @@ use syn::{Data, DeriveInput, Meta, NestedMeta, parse_macro_input};
 ///     GREEN = 1,
 ///     BLUE = 2,
 /// }
-/// impl ::std::convert::TryFrom<u8> for ColorChannel {
+/// impl ::core::convert::TryFrom<u8> for ColorChannel {
 ///     type Error = u8;
 ///     fn try_from(value: u8) -> Result<Self, Self::Error> {
 ///         if value == 0 {
@@ -38,7 +38,7 @@ use syn::{Data, DeriveInput, Meta, NestedMeta, parse_macro_input};
 ///         }
 ///     }
 /// }
-/// impl ::std::convert::From<ColorChannel> for u8 {
+/// impl ::core::convert::From<ColorChannel> for u8 {
 ///     fn from(value: ColorChannel) -> Self {
 ///         match value {
 ///             ColorChannel::RED => 0,
@@ -120,7 +120,7 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
     }
 
     let expanded = quote! {
-        impl ::std::convert::TryFrom<#inner_type> for #enum_name {
+        impl ::core::convert::TryFrom<#inner_type> for #enum_name {
             type Error = #inner_type;
             fn try_from(value: #inner_type) -> Result<Self, Self::Error> {
                 #(#try_from_inner_ifs)*
@@ -129,7 +129,7 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
                 }
             }
         }
-        impl ::std::convert::From<#enum_name> for #inner_type {
+        impl ::core::convert::From<#enum_name> for #inner_type {
             fn from(value: #enum_name) -> Self {
                 match value {
                     #(#from_enum_arms)*
