@@ -47,3 +47,51 @@ impl ::std::convert::From<ColorChannel> for u8 {
     }
 }
 ```
+
+## from_to_other
+
+Additionally, when the feature `from_to_other` is enabled, an attribute macro named `from_to_other` is enabled, which generates conversions to and from a base type, representing unknown values using an `Other` enum variant. For example:
+
+```rust
+use from_to_repr::from_to_other;
+
+#[from_to_other(base_type = u8)]
+enum ColorCommand {
+    SetRed = 0,
+    SetGreen = 1,
+    SetBlue = 2,
+    Other(u8),
+}
+```
+is equivalent to
+```rust
+enum ColorCommand {
+    SetRed,
+    SetGreen,
+    SetBlue,
+    Other(u8),
+}
+impl ::core::convert::From<u8> for ColorCommand {
+    fn from(base_value: u8) -> Self {
+        if base_value == 0 {
+            Self::SetRed
+        } else if base_value == 1 {
+            Self::SetGreen
+        } else if base_value == 2 {
+            Self::SetBlue
+        } else {
+            Self::Other(value)
+        }
+    }
+}
+impl ::core::convert::From<ColorCommand> for u8 {
+    fn from(enum_value: ColorCommand) -> Self {
+        match enum_value {
+            ColorCommand::SetRed => 0,
+            ColorCommand::SetGreen => 1,
+            ColorCommand::SetBlue => 2,
+            ColorCommand::Other(other) => other,
+        }
+    }
+}
+```

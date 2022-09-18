@@ -8,6 +8,9 @@ repository = "https://github.com/RavuAlHemio/from-to-repr"
 readme = "README.md"
 keywords = ["enum", "from"]
 
+[features]
+from_to_other = ["syn/full"]
+
 [dependencies]
 proc-macro2 = { version = "1.0.43" }
 quote = { version = "1.0.21" }

@@ -1,3 +1,7 @@
+#[cfg(feature = "from_to_other")]
+mod from_to_other_impl;
+
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Meta, NestedMeta, parse_macro_input};
@@ -139,4 +143,238 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+
+/// Derives [`From`] implementations for an enumeration and a specified type. Unknown values are
+/// mapped to an _Other_ variant (which can have a custom name).
+///
+/// ```
+/// use from_to_repr::from_to_other;
+///
+/// #[from_to_other(base_type = u8)]
+/// enum ColorCommand {
+///     SetRed = 0,
+///     SetGreen = 1,
+///     SetBlue = 2,
+///     Other(u8),
+/// }
+/// ```
+/// is equivalent to
+/// ```
+/// enum ColorCommand {
+///     SetRed,
+///     SetGreen,
+///     SetBlue,
+///     Other(u8),
+/// }
+/// impl ::core::convert::From<u8> for ColorCommand {
+///     fn from(base_value: u8) -> Self {
+///         if base_value == 0 {
+///             Self::SetRed
+///         } else if base_value == 1 {
+///             Self::SetGreen
+///         } else if base_value == 2 {
+///             Self::SetBlue
+///         } else {
+///             Self::Other(value)
+///         }
+///     }
+/// }
+/// impl ::core::convert::From<ColorCommand> for u8 {
+///     fn from(enum_value: ColorCommand) -> Self {
+///         match enum_value {
+///             ColorCommand::SetRed => 0,
+///             ColorCommand::SetGreen => 1,
+///             ColorCommand::SetBlue => 2,
+///             ColorCommand::Other(other) => other,
+///         }
+///     }
+/// }
+/// ```
+#[cfg(feature = "from_to_other")]
+#[proc_macro_attribute]
+pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
+    use proc_macro2::{TokenStream as TokenStream2, TokenTree};
+    use syn::{Error, Expr, Ident, ItemEnum, Type, Variant};
+    use syn::punctuated::Punctuated;
+    use syn::spanned::Spanned;
+
+    use crate::from_to_other_impl::KeyValuePairs;
+
+    let enum_def = parse_macro_input!(item as ItemEnum);
+    let args = parse_macro_input!(attr as KeyValuePairs);
+
+    let enum_name = enum_def.ident.clone();
+
+    let mut base_type_opt = None;
+    for arg in args.kvps {
+        if arg.path.is_ident("base_type") {
+            if let TokenTree::Ident(ident) = arg.token_tree {
+                let lit_string = ident.to_string();
+                if lit_string == "u8" || lit_string == "u16" || lit_string == "u16" || lit_string == "u32" || lit_string == "u64" || lit_string == "u128" || lit_string == "usize"
+                        || lit_string == "i8" || lit_string == "i16" || lit_string == "i16" || lit_string == "i32" || lit_string == "i64" || lit_string == "i128" || lit_string == "isize" {
+                    base_type_opt = Some(ident);
+                } else {
+                    return Error::new(ident.span(), "\"base_type\" value must be an integral type like u8")
+                        .to_compile_error()
+                        .into();
+                }
+            } else {
+                return Error::new(arg.token_tree.span(), "\"base_type\" value must be an integral type like u8")
+                    .to_compile_error()
+                    .into();
+            }
+        } else {
+            return Error::new(arg.eq_token.span, "unknown argument")
+                .to_compile_error()
+                .into();
+        }
+    }
+
+    let base_type = match base_type_opt {
+        Some(bt) => bt,
+        None => return Error::new(enum_def.enum_token.span, "\"base_type\" argument on \"from_to_other\" attribute is required, e.g. #[from_to_other(base_type = u8)]")
+            .to_compile_error()
+            .into(),
+    };
+
+    // process the enum's variants
+    let mut enum_key_to_value: Vec<(Ident, Expr)> = Vec::new();
+    let mut cut_variants = Punctuated::new();
+    let mut other_value_name_opt = None;
+    for variant in enum_def.variants.iter() {
+        if let Some((_, discr)) = &variant.discriminant {
+            if !variant.fields.is_empty() {
+                return Error::new(variant.span(), "enum variant must have either a field or a discriminant, not both")
+                    .to_compile_error()
+                    .into();
+            }
+
+            // remember the discriminant for later; we will be removing it now
+            enum_key_to_value.push((variant.ident.clone(), discr.clone()));
+        } else {
+            if other_value_name_opt.is_some() {
+                return Error::new(variant.span(), "only one value (the \"other\" value) may contain a field instead of a discriminant")
+                    .to_compile_error()
+                    .into();
+            }
+            if variant.fields.len() != 1 {
+                return Error::new(variant.span(), "all values must contain a discriminant, except the \"other\" value, which must contain exactly one field")
+                    .to_compile_error()
+                    .into();
+            }
+            let one_field = variant.fields.iter().nth(0).unwrap();
+            if one_field.ident.is_some() {
+                return Error::new(one_field.span(), "the \"other\" value's field must be unnamed")
+                    .to_compile_error()
+                    .into();
+            }
+            if let Type::Path(one_field_type) = &one_field.ty {
+                if !one_field_type.path.is_ident(&base_type) {
+                    return Error::new(one_field_type.span(), "the \"other\" value's field must be of the enum's base type")
+                        .to_compile_error()
+                        .into();
+                }
+                if one_field_type.qself.is_some() {
+                    return Error::new(one_field_type.span(), "the \"other\" value's field's type must not have a self-qualifier")
+                        .to_compile_error()
+                        .into();
+                }
+            }
+            other_value_name_opt = Some(variant.ident.clone());
+        }
+        cut_variants.push(Variant {
+            attrs: variant.attrs.clone(),
+            ident: variant.ident.clone(),
+            discriminant: None,
+            fields: variant.fields.clone(),
+        });
+    }
+
+    let other_value_name = match other_value_name_opt {
+        Some(ovn) => ovn,
+        None => return Error::new(enum_def.ident.span(), "the enumeration does not have an \"other\" value for unmatched values")
+            .to_compile_error()
+            .into(),
+    };
+
+    // prepare the enum (without the discriminants)
+    let cut_enum = ItemEnum {
+        attrs: enum_def.attrs.clone(),
+        vis: enum_def.vis,
+        enum_token: enum_def.enum_token,
+        ident: enum_def.ident,
+        generics: enum_def.generics,
+        brace_token: enum_def.brace_token,
+        variants: cut_variants,
+    };
+
+    // implement the conversion from the base type
+    let from_base_type_impl = if enum_key_to_value.is_empty() {
+        // there's only the "other" variant
+        quote! {
+            impl ::core::convert::From<#base_type> for #enum_name {
+                fn from(base_value: #base_type) -> Self {
+                    Self::#other_value_name(base_value)
+                }
+            }
+        }
+    } else {
+        let pieces: Vec<TokenStream2> = enum_key_to_value.iter().map(
+            |(key, value)| quote! {
+                if base_value == #value {
+                    Self::#key
+                } else
+            }
+        )
+            .collect();
+        quote! {
+            impl ::core::convert::From<#base_type> for #enum_name {
+                fn from(base_value: #base_type) -> Self {
+                    #(#pieces)*
+                    {
+                        Self::#other_value_name(base_value)
+                    }
+                }
+            }
+        }
+    };
+
+    // implement the conversion to the base type
+    let to_base_type_impl = if enum_key_to_value.is_empty() {
+        // there's only the "other" variant
+        quote! {
+            impl ::core::convert::From<#enum_name> for #base_type {
+                fn from(enum_value: #enum_name) -> Self {
+                    match enum_value {
+                        Self::#other_value_name(v) => v,
+                    }
+                }
+            }
+        }
+    } else {
+        let variants = enum_key_to_value.into_iter().map(
+            |(key, value)| quote! {
+                #enum_name::#key => #value,
+            }
+        );
+        quote! {
+            impl ::core::convert::From<#enum_name> for #base_type {
+                fn from(enum_value: #enum_name) -> Self {
+                    match enum_value {
+                        #(#variants)*
+                        #enum_name::#other_value_name(v) => v,
+                    }
+                }
+            }
+        }
+    };
+
+    let output = quote! {
+        #cut_enum
+        #from_base_type_impl
+        #to_base_type_impl
+    };
+    TokenStream::from(output)
 }
