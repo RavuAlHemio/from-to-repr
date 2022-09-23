@@ -149,6 +149,25 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
 /// Derives [`From`] implementations for an enumeration and a specified type. Unknown values are
 /// mapped to an _Other_ variant (which can have a custom name).
 ///
+/// The following arguments can be passed to this macro:
+///
+/// * `base_type` (required): The type used to represent values of this enumeration.
+///
+/// * `derive_compare` (optional): Automatically derives comparison traits ([`PartialEq`],
+///   [`PartialOrd`], [`Eq`], [`Ord`], [`core::hash::Hash`]) according to the value.
+///
+///     * If the value is `"none"` (the default), no comparison traits are derived.
+/// 
+///     * If the value is `"as_enum"`, the comparison traits are derived as is common in Rust
+///       (equivalent to specifying `#[derive(PartialEq, PartialOrd, Eq, Ord, Hash)]` on the enum),
+///       which means that every `Other(_)` value will compare not-equal to every known value (e.g.
+///       `Self::Other(12) != Self::Twelve` where `Twelve = 12`).
+///
+///     * If the value is `"as_int"`, a custom derivation of these five traits is used, which
+///       compares the base-type representations. This means that an `Other(_)` value will compare
+///       equal to the matching known value (e.g. `Self::Other(12) == Self::Twelve` where
+///       `Twelve = 12`).
+///
 /// ```
 /// use from_to_repr::from_to_other;
 ///
@@ -196,7 +215,7 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
     use proc_macro2::{TokenStream as TokenStream2, TokenTree};
-    use syn::{Error, Expr, Ident, ItemEnum, Type, Variant};
+    use syn::{Error, Expr, Ident, ItemEnum, LitStr, Type, Variant};
     use syn::punctuated::Punctuated;
     use syn::spanned::Spanned;
 
@@ -207,14 +226,26 @@ pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let enum_name = enum_def.ident.clone();
 
+    enum DeriveCompareMode {
+        None,
+        AsEnum,
+        AsInt,
+    }
+    let mut derive_compare_mode = DeriveCompareMode::None;
+    let mut derive_compare_mode_set = false;
+
     let mut base_type_opt = None;
     for arg in args.kvps {
         if arg.path.is_ident("base_type") {
-            if let TokenTree::Ident(ident) = arg.token_tree {
+            if base_type_opt.is_some() {
+                return Error::new(arg.path.span(), "cannot set \"base_type\" more than once")
+                    .to_compile_error()
+                    .into();
+            } else if let TokenTree::Ident(ident) = arg.token_tree {
                 let lit_string = ident.to_string();
                 if lit_string == "u8" || lit_string == "u16" || lit_string == "u16" || lit_string == "u32" || lit_string == "u64" || lit_string == "u128" || lit_string == "usize"
                         || lit_string == "i8" || lit_string == "i16" || lit_string == "i16" || lit_string == "i32" || lit_string == "i64" || lit_string == "i128" || lit_string == "isize" {
-                    base_type_opt = Some(ident);
+                    base_type_opt = Some(ident)
                 } else {
                     return Error::new(ident.span(), "\"base_type\" value must be an integral type like u8")
                         .to_compile_error()
@@ -222,6 +253,44 @@ pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             } else {
                 return Error::new(arg.token_tree.span(), "\"base_type\" value must be an integral type like u8")
+                    .to_compile_error()
+                    .into();
+            }
+        } else if arg.path.is_ident("derive_compare") {
+            if derive_compare_mode_set {
+                return Error::new(arg.path.span(), "cannot set \"derive_compare\" more than once")
+                    .to_compile_error()
+                    .into();
+            } else if let TokenTree::Literal(ident_literal) = arg.token_tree {
+                let ident_stream: TokenStream2 = TokenTree::from(ident_literal.clone()).into();
+                let ident_result: Result<LitStr, _> = syn::parse2(ident_stream);
+                if let Ok(ident) = ident_result {
+                    match ident.value().as_str() {
+                        "none" => {
+                            derive_compare_mode = DeriveCompareMode::None;
+                            derive_compare_mode_set = true;
+                        },
+                        "as_enum" => {
+                            derive_compare_mode = DeriveCompareMode::AsEnum;
+                            derive_compare_mode_set = true;
+                        },
+                        "as_int" => {
+                            derive_compare_mode = DeriveCompareMode::AsInt;
+                            derive_compare_mode_set = true;
+                        },
+                        _ => {
+                            return Error::new(ident.span(), "\"derive_compare\" value must be one of: \"none\", \"as_enum\", \"as_int\"")
+                                .to_compile_error()
+                                .into();
+                        },
+                    }
+                } else {
+                    return Error::new(ident_literal.span(), "\"derive_compare\" value must be a string literal")
+                        .to_compile_error()
+                        .into();
+                };
+            } else {
+                return Error::new(arg.token_tree.span(), "\"derive_compare\" value must be a string literal")
                     .to_compile_error()
                     .into();
             }
@@ -371,10 +440,52 @@ pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    // derive or implement the comparisons
+    let derive_compare_top = if let DeriveCompareMode::AsEnum = derive_compare_mode {
+        // standard derived implementation of Eq and Ord
+        // (Other always compares not-equal with a matching known value)
+        quote! {
+            #[derive(Eq, Hash, Ord, PartialEq, PartialOrd)]
+        }
+    } else {
+        quote! {}
+    };
+    let derive_compare_impl = if let DeriveCompareMode::AsInt = derive_compare_mode {
+        // integer-based implementation of Eq and Ord
+        // (Other compares equal with a matching known value)
+        quote! {
+            impl ::core::cmp::PartialEq for #enum_name {
+                fn eq(&self, other: &Self) -> bool {
+                    #base_type::from(*self).eq(&#base_type::from(*other))
+                }
+            }
+            impl ::core::cmp::Eq for #enum_name {}
+            impl ::core::cmp::PartialOrd for #enum_name {
+                fn partial_cmp(&self, other: &Self) -> Option<::core::cmp::Ordering> {
+                    #base_type::from(*self).partial_cmp(&#base_type::from(*other))
+                }
+            }
+            impl ::core::cmp::Ord for #enum_name {
+                fn cmp(&self, other: &Self) -> ::core::cmp::Ordering {
+                    #base_type::from(*self).cmp(&#base_type::from(*other))
+                }
+            }
+            impl ::core::hash::Hash for #enum_name {
+                fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+                    #base_type::from(*self).hash(state)
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let output = quote! {
+        #derive_compare_top
         #cut_enum
         #from_base_type_impl
         #to_base_type_impl
+        #derive_compare_impl
     };
     TokenStream::from(output)
 }
