@@ -212,6 +212,7 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[cfg(feature = "from_to_other")]
+#[cfg_attr(docsrs, doc(cfg(feature = "from_to_other")))]
 #[proc_macro_attribute]
 pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
     use proc_macro2::{TokenStream as TokenStream2, TokenTree};
