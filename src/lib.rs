@@ -1,3 +1,6 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+
 #[cfg(feature = "from_to_other")]
 mod from_to_other_impl;
 
