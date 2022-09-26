@@ -385,61 +385,36 @@ pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     // implement the conversion from the base type
-    let from_base_type_impl = if enum_key_to_value.is_empty() {
-        // there's only the "other" variant
-        quote! {
-            impl ::core::convert::From<#base_type> for #enum_name {
-                fn from(base_value: #base_type) -> Self {
-                    Self::#other_value_name(base_value)
-                }
-            }
+    let from_base_type_pieces = enum_key_to_value.iter().map(
+        |(key, value)| quote! {
+            if base_value == #value {
+                Self::#key
+            } else
         }
-    } else {
-        let pieces: Vec<TokenStream2> = enum_key_to_value.iter().map(
-            |(key, value)| quote! {
-                if base_value == #value {
-                    Self::#key
-                } else
-            }
-        )
-            .collect();
-        quote! {
-            impl ::core::convert::From<#base_type> for #enum_name {
-                fn from(base_value: #base_type) -> Self {
-                    #(#pieces)*
-                    {
-                        Self::#other_value_name(base_value)
-                    }
+    );
+    let from_base_type_impl = quote! {
+        impl ::core::convert::From<#base_type> for #enum_name {
+            fn from(base_value: #base_type) -> Self {
+                #(#from_base_type_pieces)*
+                {
+                    Self::#other_value_name(base_value)
                 }
             }
         }
     };
 
     // implement the conversion to the base type
-    let to_base_type_impl = if enum_key_to_value.is_empty() {
-        // there's only the "other" variant
-        quote! {
-            impl ::core::convert::From<#enum_name> for #base_type {
-                fn from(enum_value: #enum_name) -> Self {
-                    match enum_value {
-                        Self::#other_value_name(v) => v,
-                    }
-                }
-            }
+    let to_base_type_variants = enum_key_to_value.into_iter().map(
+        |(key, value)| quote! {
+            #enum_name::#key => #value,
         }
-    } else {
-        let variants = enum_key_to_value.into_iter().map(
-            |(key, value)| quote! {
-                #enum_name::#key => #value,
-            }
-        );
-        quote! {
-            impl ::core::convert::From<#enum_name> for #base_type {
-                fn from(enum_value: #enum_name) -> Self {
-                    match enum_value {
-                        #(#variants)*
-                        #enum_name::#other_value_name(v) => v,
-                    }
+    );
+    let to_base_type_impl = quote! {
+        impl ::core::convert::From<#enum_name> for #base_type {
+            fn from(enum_value: #enum_name) -> Self {
+                match enum_value {
+                    #(#to_base_type_variants)*
+                    #enum_name::#other_value_name(v) => v,
                 }
             }
         }
