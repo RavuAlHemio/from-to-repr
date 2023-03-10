@@ -31,27 +31,35 @@ use syn::{Data, DeriveInput, Meta, NestedMeta, parse_macro_input};
 ///     GREEN = 1,
 ///     BLUE = 2,
 /// }
+/// impl ColorChannel {
+///     pub const fn try_from_repr(value: u8) -> Option<Self> {
+///         if value == 0 {
+///             Some(Self::RED)
+///         } else if value == 1 {
+///             Some(Self::GREEN)
+///         } else if value == 2 {
+///             Some(Self::BLUE)
+///         } else {
+///             None
+///         }
+///     }
+///     pub const fn into_repr(&self) -> u8 {
+///         match self {
+///             Self::RED => 0,
+///             Self::GREEN => 1,
+///             Self::BLUE => 2,
+///         }
+///     }
+/// }
 /// impl ::core::convert::TryFrom<u8> for ColorChannel {
 ///     type Error = u8;
 ///     fn try_from(value: u8) -> Result<Self, Self::Error> {
-///         if value == 0 {
-///             Ok(Self::RED)
-///         } else if value == 1 {
-///             Ok(Self::GREEN)
-///         } else if value == 2 {
-///             Ok(Self::BLUE)
-///         } else {
-///             Err(value)
-///         }
+///         Self::try_from_repr(value).ok_or(value)
 ///     }
 /// }
 /// impl ::core::convert::From<ColorChannel> for u8 {
 ///     fn from(value: ColorChannel) -> Self {
-///         match value {
-///             ColorChannel::RED => 0,
-///             ColorChannel::GREEN => 1,
-///             ColorChannel::BLUE => 2,
-///         }
+///         value.into_repr()
 ///     }
 /// }
 /// ```
@@ -121,26 +129,35 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
         });
         try_from_inner_ifs.push(quote!{
             if value == #discriminant {
-                Ok(Self::#variant_name)
+                Some(Self::#variant_name)
             } else
         });
     }
 
     let expanded = quote! {
+        impl #enum_name {
+            pub const fn try_from_repr(value: #inner_type) -> Option<Self> {
+                #(#try_from_inner_ifs)*
+                {
+                    None
+                }
+            }
+
+            pub const fn into_repr(&self) -> #inner_type {
+                match self {
+                    #(#from_enum_arms)*
+                }
+            }
+        }
         impl ::core::convert::TryFrom<#inner_type> for #enum_name {
             type Error = #inner_type;
             fn try_from(value: #inner_type) -> Result<Self, Self::Error> {
-                #(#try_from_inner_ifs)*
-                {
-                    Err(value)
-                }
+                Self::try_from_repr(value).ok_or(value)
             }
         }
         impl ::core::convert::From<#enum_name> for #inner_type {
             fn from(value: #enum_name) -> Self {
-                match value {
-                    #(#from_enum_arms)*
-                }
+                value.into_repr()
             }
         }
     };
@@ -190,8 +207,8 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
 ///     SetBlue,
 ///     Other(u8),
 /// }
-/// impl ::core::convert::From<u8> for ColorCommand {
-///     fn from(base_value: u8) -> Self {
+/// impl ColorCommand {
+///     pub const fn from_base_type(base_value: u8) -> Self {
 ///         if base_value == 0 {
 ///             Self::SetRed
 ///         } else if base_value == 1 {
@@ -199,19 +216,23 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
 ///         } else if base_value == 2 {
 ///             Self::SetBlue
 ///         } else {
-///             Self::Other(value)
+///             Self::Other(base_value)
+///         }
+///     }
+///     pub const fn to_base_type(&self) -> u8 {
+///         match self {
+///             Self::SetRed => 0,
+///             Self::SetGreen => 1,
+///             Self::SetBlue => 2,
+///             Self::Other(other) => *other,
 ///         }
 ///     }
 /// }
+/// impl ::core::convert::From<u8> for ColorCommand {
+///     fn from(base_value: u8) -> Self { Self::from_base_type(base_value) }
+/// }
 /// impl ::core::convert::From<ColorCommand> for u8 {
-///     fn from(enum_value: ColorCommand) -> Self {
-///         match enum_value {
-///             ColorCommand::SetRed => 0,
-///             ColorCommand::SetGreen => 1,
-///             ColorCommand::SetBlue => 2,
-///             ColorCommand::Other(other) => other,
-///         }
-///     }
+///     fn from(enum_value: ColorCommand) -> Self { enum_value.to_base_type() }
 /// }
 /// ```
 #[cfg(feature = "from_to_other")]
@@ -393,30 +414,36 @@ pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     );
     let from_base_type_impl = quote! {
-        impl ::core::convert::From<#base_type> for #enum_name {
-            fn from(base_value: #base_type) -> Self {
+        impl #enum_name {
+            pub const fn from_base_type(base_value: #base_type) -> Self {
                 #(#from_base_type_pieces)*
                 {
                     Self::#other_value_name(base_value)
                 }
             }
         }
+        impl ::core::convert::From<#base_type> for #enum_name {
+            fn from(base_value: #base_type) -> Self { Self::from_base_type(base_value) }
+        }
     };
 
     // implement the conversion to the base type
     let to_base_type_variants = enum_key_to_value.into_iter().map(
         |(key, value)| quote! {
-            #enum_name::#key => #value,
+            Self::#key => #value,
         }
     );
     let to_base_type_impl = quote! {
-        impl ::core::convert::From<#enum_name> for #base_type {
-            fn from(enum_value: #enum_name) -> Self {
-                match enum_value {
+        impl #enum_name {
+            pub const fn to_base_type(&self) -> #base_type {
+                match self {
                     #(#to_base_type_variants)*
-                    #enum_name::#other_value_name(v) => v,
+                    #enum_name::#other_value_name(v) => *v,
                 }
             }
+        }
+        impl ::core::convert::From<#enum_name> for #base_type {
+            fn from(enum_value: #enum_name) -> Self { enum_value.to_base_type() }
         }
     };
 
