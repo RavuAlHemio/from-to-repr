@@ -62,18 +62,18 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
 
     let enum_data = match ast.data {
         Data::Enum(ed) => ed,
-        _ => panic!("#[derive(FromToPrimitive)] can only be applied to enums"),
+        _ => panic!("#[derive(FromToRepr)] can only be applied to enums"),
     };
 
     let enum_repr = ast.attrs.iter()
         .filter(|attr| attr.path.is_ident("repr"))
         .nth(0)
-        .expect("#[derive(FromToPrimitive)] can only be applied to enums with a #[repr(...)] attribute");
+        .expect("#[derive(FromToRepr)] can only be applied to enums with a #[repr(...)] attribute");
     let enum_repr_type = enum_repr.parse_meta()
-        .expect("#[derive(FromToPrimitive)] failed to parse #[repr(...)] attribute");
+        .expect("#[derive(FromToRepr)] failed to parse #[repr(...)] attribute");
     let enum_list = match enum_repr_type {
         Meta::List(el) => el,
-        _ => panic!("#[derive(FromToPrimitive)] failed to parse #[repr(...)] attribute as a list"),
+        _ => panic!("#[derive(FromToRepr)] failed to parse #[repr(...)] attribute as a list"),
     };
     let reprs = enum_list.nested;
     let mut inner_type_opt = None;
@@ -85,7 +85,7 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
                             || ident == "i8" || ident == "i16" || ident == "i32" || ident == "i64" || ident == "i128" || ident == "isize" {
                         if let Some(existing_type) = &inner_type_opt {
                             panic!(
-                                "#[derive(FromToPrimitive)] found multiple types in #[repr(...)] -- at least {:?} and {:?}",
+                                "#[derive(FromToRepr)] found multiple types in #[repr(...)] -- at least {:?} and {:?}",
                                 existing_type, ident,
                             );
                         } else {
@@ -99,7 +99,7 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
 
     let inner_type = match inner_type_opt {
         Some(it) => it,
-        None => panic!("#[derive(FromToPrimitive)] did not find a type in #[repr(...)]"),
+        None => panic!("#[derive(FromToRepr)] did not find a type in #[repr(...)]"),
     };
 
     let mut from_enum_arms: Vec<proc_macro2::TokenStream> = Vec::with_capacity(enum_data.variants.len());
@@ -108,12 +108,12 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
         let variant_name = variant.ident;
 
         if variant.fields.len() > 0 {
-            panic!("#[derive(FromToPrimitive)] cannot be used on enums whose variants have fields");
+            panic!("#[derive(FromToRepr)] cannot be used on enums whose variants have fields");
         }
 
         let discriminant = match variant.discriminant {
             Some((_eq_sign, d)) => d,
-            None => panic!("#[derive(FromToPrimitive)] requires that all enum entries have explicit discriminants"),
+            None => panic!("#[derive(FromToRepr)] requires that all enum entries have explicit discriminants"),
         };
 
         from_enum_arms.push(quote!{
