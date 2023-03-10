@@ -247,8 +247,8 @@ pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
                     .into();
             } else if let TokenTree::Ident(ident) = arg.token_tree {
                 let lit_string = ident.to_string();
-                if lit_string == "u8" || lit_string == "u16" || lit_string == "u16" || lit_string == "u32" || lit_string == "u64" || lit_string == "u128" || lit_string == "usize"
-                        || lit_string == "i8" || lit_string == "i16" || lit_string == "i16" || lit_string == "i32" || lit_string == "i64" || lit_string == "i128" || lit_string == "isize"
+                if lit_string == "u8" || lit_string == "u16" || lit_string == "u32" || lit_string == "u64" || lit_string == "u128" || lit_string == "usize"
+                        || lit_string == "i8" || lit_string == "i16" || lit_string == "i32" || lit_string == "i64" || lit_string == "i128" || lit_string == "isize"
                         || lit_string == "bool" {
                     base_type_opt = Some(ident)
                 } else {
