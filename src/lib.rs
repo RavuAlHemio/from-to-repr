@@ -7,7 +7,7 @@ mod from_to_other_impl;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Meta, NestedMeta, parse_macro_input};
+use syn::{Data, DeriveInput, parse_macro_input};
 
 
 /// Derives [`TryFrom`] and [`From`] implementations for the representation type of an enumeration.
@@ -74,37 +74,27 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
     };
 
     let enum_repr = ast.attrs.iter()
-        .filter(|attr| attr.path.is_ident("repr"))
+        .filter(|attr| attr.path().is_ident("repr"))
         .nth(0)
         .expect("#[derive(FromToRepr)] can only be applied to enums with a #[repr(...)] attribute");
-    let enum_repr_type = enum_repr.parse_meta()
-        .expect("#[derive(FromToRepr)] failed to parse #[repr(...)] attribute");
-    let enum_list = match enum_repr_type {
-        Meta::List(el) => el,
-        _ => panic!("#[derive(FromToRepr)] failed to parse #[repr(...)] attribute as a list"),
-    };
-    let reprs = enum_list.nested;
     let mut inner_type_opt = None;
-    for repr in reprs {
-        if let NestedMeta::Meta(repr_meta) = repr {
-            if let Meta::Path(repr_type_path) = repr_meta {
-                if let Some(ident) = repr_type_path.get_ident() {
-                    if ident == "u8" || ident == "u16" || ident == "u32" || ident == "u64" || ident == "u128" || ident == "usize"
-                            || ident == "i8" || ident == "i16" || ident == "i32" || ident == "i64" || ident == "i128" || ident == "isize" {
-                        if let Some(existing_type) = &inner_type_opt {
-                            panic!(
-                                "#[derive(FromToRepr)] found multiple types in #[repr(...)] -- at least {:?} and {:?}",
-                                existing_type, ident,
-                            );
-                        } else {
-                            inner_type_opt = Some(ident.clone());
-                        }
-                    }
+    enum_repr.parse_nested_meta(|meta| {
+        if let Some(ident) = meta.path.get_ident() {
+            if ident == "u8" || ident == "u16" || ident == "u32" || ident == "u64" || ident == "u128" || ident == "usize"
+                    || ident == "i8" || ident == "i16" || ident == "i32" || ident == "i64" || ident == "i128" || ident == "isize" {
+                if let Some(existing_type) = &inner_type_opt {
+                    panic!(
+                        "#[derive(FromToRepr)] found multiple types in #[repr(...)] -- at least {:?} and {:?}",
+                        existing_type, ident,
+                    );
+                } else {
+                    inner_type_opt = Some(ident.clone());
                 }
             }
         }
-    }
-
+        Ok(())
+    })
+        .expect("#[derive(FromToRepr)] failed to parse #[repr(...)] attribute");
     let inner_type = match inner_type_opt {
         Some(it) => it,
         None => panic!("#[derive(FromToRepr)] did not find a type in #[repr(...)]"),
