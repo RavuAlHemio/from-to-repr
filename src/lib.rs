@@ -119,17 +119,17 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
         });
         try_from_inner_ifs.push(quote!{
             if value == #discriminant {
-                Some(Self::#variant_name)
+                ::core::option::Option::Some(Self::#variant_name)
             } else
         });
     }
 
     let expanded = quote! {
         impl #enum_name {
-            pub const fn try_from_repr(value: #inner_type) -> Option<Self> {
+            pub const fn try_from_repr(value: #inner_type) -> ::core::option::Option<Self> {
                 #(#try_from_inner_ifs)*
                 {
-                    None
+                    ::core::option::Option::None
                 }
             }
 
@@ -141,7 +141,7 @@ pub fn derive_from_to_repr(item: TokenStream) -> TokenStream {
         }
         impl ::core::convert::TryFrom<#inner_type> for #enum_name {
             type Error = #inner_type;
-            fn try_from(value: #inner_type) -> Result<Self, Self::Error> {
+            fn try_from(value: #inner_type) -> ::core::result::Result<Self, Self::Error> {
                 Self::try_from_repr(value).ok_or(value)
             }
         }
@@ -458,7 +458,7 @@ pub fn from_to_other(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
             impl ::core::cmp::Eq for #enum_name {}
             impl ::core::cmp::PartialOrd for #enum_name {
-                fn partial_cmp(&self, other: &Self) -> Option<::core::cmp::Ordering> {
+                fn partial_cmp(&self, other: &Self) -> ::core::option::Option<::core::cmp::Ordering> {
                     #base_type::from(*self).partial_cmp(&#base_type::from(*other))
                 }
             }
